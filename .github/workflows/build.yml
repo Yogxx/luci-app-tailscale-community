@@ -57,17 +57,18 @@ jobs:
           restore-keys: |
             sdk-${{ matrix.version }}-aarch64_cortex-a72-
 
-      - name: Add package into SDK
-        run: |
-          mkdir -p sdk/package/luci-app-tailscale-community
-          cp -r package-src/. sdk/package/luci-app-tailscale-community/
-          rm -rf sdk/package/luci-app-tailscale-community/.github
-
       - name: Update and install feeds
         working-directory: sdk
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+
+      - name: Add package into luci feed (so ../../luci.mk resolves)
+        run: |
+          mkdir -p sdk/feeds/luci/applications/luci-app-tailscale-community
+          cp -r package-src/. sdk/feeds/luci/applications/luci-app-tailscale-community/
+          rm -rf sdk/feeds/luci/applications/luci-app-tailscale-community/.github
+          ln -sf ../../feeds/luci/applications/luci-app-tailscale-community sdk/package/luci-app-tailscale-community
 
       - name: Build package only
         working-directory: sdk

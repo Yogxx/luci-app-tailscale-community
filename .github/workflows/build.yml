@@ -78,6 +78,7 @@ jobs:
         working-directory: sdk
         run: |
           make defconfig
+          make package/luci-app-tailscale-community/download V=s -j1
           make package/luci-app-tailscale-community/compile V=s -j$(nproc)
 
       - name: Collect built package

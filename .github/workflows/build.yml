@@ -64,11 +64,15 @@ jobs:
           ./scripts/feeds install -a
 
       - name: Add package into luci feed (so ../../luci.mk resolves)
+        working-directory: sdk
         run: |
-          mkdir -p sdk/feeds/luci/applications/luci-app-tailscale-community
-          cp -r package-src/. sdk/feeds/luci/applications/luci-app-tailscale-community/
-          rm -rf sdk/feeds/luci/applications/luci-app-tailscale-community/.github
-          ln -sf ../../feeds/luci/applications/luci-app-tailscale-community sdk/package/luci-app-tailscale-community
+          mkdir -p feeds/luci/applications/luci-app-tailscale-community
+          cp -r ../package-src/. feeds/luci/applications/luci-app-tailscale-community/
+          rm -rf feeds/luci/applications/luci-app-tailscale-community/.github
+          rm -rf package/luci-app-tailscale-community
+          ln -sf ../feeds/luci/applications/luci-app-tailscale-community package/luci-app-tailscale-community
+          ls -la package/luci-app-tailscale-community
+          ls -la feeds/luci/applications/luci-app-tailscale-community
 
       - name: Build package only
         working-directory: sdk

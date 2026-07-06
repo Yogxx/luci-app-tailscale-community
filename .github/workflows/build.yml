@@ -1,4 +1,4 @@
-name: Build luci-app-tailscale-community (IPK/APK)
+name: Build luci-app-tailscale-community
 
 on:
   workflow_dispatch:
@@ -6,90 +6,128 @@ on:
     branches:
       - main
     paths:
-      - 'root/**'
-      - 'htdocs/**'
-      - 'po/**'
-      - 'Makefile'
-      - '.github/workflows/build.yml'
+      - "root/**"
+      - "htdocs/**"
+      - "po/**"
+      - "Makefile"
+      - ".github/workflows/build.yml"
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    name: Build ${{ matrix.name }}
+    name: OpenWrt ${{ matrix.version }}
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: "24.10.7 (IPK)"
-            version: "24.10.7"
-            pkg_format: ipk
-            sdk_url: "https://downloads.openwrt.org/releases/24.10.7/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.7-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-          - name: "25.12.5 (APK)"
-            version: "25.12.5"
-            pkg_format: apk
-            sdk_url: "https://downloads.openwrt.org/releases/25.12.5/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.5-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+          - version: "24.10.7"
+            format: "ipk"
+            sdk: "https://downloads.openwrt.org/releases/24.10.7/targets/x86/64/openwrt-sdk-24.10.7-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+
+          - version: "25.12.5"
+            format: "apk"
+            sdk: "https://downloads.openwrt.org/releases/25.12.5/targets/x86/64/openwrt-sdk-25.12.5-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
 
     steps:
-      - name: Checkout package source
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          path: package-src
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev \
-            gawk git gettext libssl-dev python3 rsync unzip file wget zstd
 
-      - name: Download and extract SDK
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            flex \
+            bison \
+            gawk \
+            gettext \
+            git \
+            libncurses5-dev \
+            libssl-dev \
+            python3 \
+            rsync \
+            unzip \
+            wget \
+            zstd \
+            file
+
+      - name: Download SDK
         run: |
-          wget -q "${{ matrix.sdk_url }}" -O sdk.tar.zst
-          mkdir -p sdk
-          tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
+          wget -q "${{ matrix.sdk }}" -O sdk.tar.zst
 
-      - name: Cache SDK feeds/build state
+          mkdir sdk
+
+          tar \
+            --use-compress-program=unzstd \
+            -xf sdk.tar.zst \
+            -C sdk \
+            --strip-components=1
+
+      - name: Cache downloads
         uses: actions/cache@v4
         with:
           path: |
+            sdk/dl
             sdk/staging_dir
             sdk/build_dir
-          key: sdk-${{ matrix.version }}-aarch64_cortex-a72-${{ hashFiles('package-src/Makefile') }}
+          key: sdk-${{ matrix.version }}-${{ hashFiles('Makefile') }}
           restore-keys: |
-            sdk-${{ matrix.version }}-aarch64_cortex-a72-
+            sdk-${{ matrix.version }}-
 
-      - name: Update and install feeds
+      - name: Update feeds
         working-directory: sdk
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Add package into luci feed (so ../../luci.mk resolves)
-        working-directory: sdk
+      - name: Add package
         run: |
-          mkdir -p feeds/luci/applications/luci-app-tailscale-community
-          cp -r ../package-src/. feeds/luci/applications/luci-app-tailscale-community/
-          rm -rf feeds/luci/applications/luci-app-tailscale-community/.github
-          rm -rf package/luci-app-tailscale-community
-          ln -sf ../feeds/luci/applications/luci-app-tailscale-community package/luci-app-tailscale-community
-          ls -la package/luci-app-tailscale-community
-          ls -la feeds/luci/applications/luci-app-tailscale-community
+          mkdir -p sdk/package/luci-app-tailscale-community
 
-      - name: Build package only
+          cp -a . sdk/package/luci-app-tailscale-community
+
+          rm -rf sdk/package/luci-app-tailscale-community/.git
+          rm -rf sdk/package/luci-app-tailscale-community/.github
+
+      - name: Build
         working-directory: sdk
         run: |
           make defconfig
-          make package/luci-app-tailscale-community/compile V=s -j1
 
-      - name: Collect built package
+          make package/luci-app-tailscale-community/clean
+
+          make package/luci-app-tailscale-community/compile \
+            V=sc \
+            -j$(nproc)
+
+      - name: Show packages
         run: |
-          mkdir -p artifacts
-          find sdk/bin -type f \( -name "luci-app-tailscale-community*.ipk" -o -name "luci-app-tailscale-community*.apk" \) -exec cp {} artifacts/ \;
-          ls -la artifacts/
+          find sdk/bin/packages -type f
+
+      - name: Collect package
+        run: |
+          mkdir artifacts
+
+          find sdk/bin/packages \
+            -type f \
+            \( \
+              -name "*.ipk" \
+              -o \
+              -name "*.apk" \
+            \) \
+            -exec cp {} artifacts/ \;
+
+          ls -lh artifacts
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-tailscale-community-${{ matrix.pkg_format }}-${{ matrix.version }}
+          name: luci-app-tailscale-community-${{ matrix.version }}
           path: artifacts/*
           if-no-files-found: error
-          

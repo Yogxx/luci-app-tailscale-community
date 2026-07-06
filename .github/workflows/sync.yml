@@ -17,8 +17,8 @@ jobs:
 
       - name: Sparse checkout upstream
         run: |
-          git clone --filter=blob:none --sparse https://github.com/openwrt/luci.git upstream
-          cd upstream
+          git clone --filter=blob:none --sparse https://github.com/openwrt/luci.git /tmp/upstream
+          cd /tmp/upstream
           git sparse-checkout set applications/luci-app-tailscale-community
 
       - name: Sync files (exclude .git and workflow)
@@ -26,7 +26,7 @@ jobs:
           rsync -av --delete \
             --exclude '.git' \
             --exclude '.github' \
-            upstream/applications/luci-app-tailscale-community/ ./
+            /tmp/upstream/applications/luci-app-tailscale-community/ ./
 
       - name: Commit and push if changed
         run: |

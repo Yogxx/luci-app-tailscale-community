@@ -1,0 +1,41 @@
+name: Sync luci-app-tailscale-community from openwrt/luci
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'   # tiap Minggu jam 00:00 UTC
+  workflow_dispatch:        # bisa trigger manual juga
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Sparse checkout upstream
+        run: |
+          git clone --filter=blob:none --sparse https://github.com/openwrt/luci.git upstream
+          cd upstream
+          git sparse-checkout set applications/luci-app-tailscale-community
+
+      - name: Sync files (exclude .git and workflow)
+        run: |
+          rsync -av --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            upstream/applications/luci-app-tailscale-community/ ./
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: sync from openwrt/luci ($(date -u +%Y-%m-%d))"
+            git push
+          else
+            echo "No changes to sync."
+          fi

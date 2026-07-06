@@ -6,18 +6,17 @@ on:
     branches:
       - main
     paths:
-      - "root/**"
-      - "htdocs/**"
-      - "po/**"
-      - "Makefile"
-      - ".github/workflows/build.yml"
+      - 'root/**'
+      - 'htdocs/**'
+      - 'po/**'
+      - 'Makefile'
+      - '.github/workflows/build.yml'
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: OpenWrt ${{ matrix.version }}
     runs-on: ubuntu-latest
 
     strategy:
@@ -25,21 +24,24 @@ jobs:
       matrix:
         include:
           - version: "24.10.7"
-            format: "ipk"
+            type: ipk
             sdk: "https://downloads.openwrt.org/releases/24.10.7/targets/x86/64/openwrt-sdk-24.10.7-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
 
           - version: "25.12.5"
-            format: "apk"
+            type: apk
             sdk: "https://downloads.openwrt.org/releases/25.12.5/targets/x86/64/openwrt-sdk-25.12.5-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
 
+    name: OpenWrt ${{ matrix.version }}
+
     steps:
-      - name: Checkout
+      - name: Checkout package
         uses: actions/checkout@v4
+        with:
+          path: package-src
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
             build-essential \
             clang \
@@ -60,23 +62,20 @@ jobs:
       - name: Download SDK
         run: |
           wget -q "${{ matrix.sdk }}" -O sdk.tar.zst
-
           mkdir sdk
+          tar --use-compress-program=unzstd \
+              -xf sdk.tar.zst \
+              -C sdk \
+              --strip-components=1
 
-          tar \
-            --use-compress-program=unzstd \
-            -xf sdk.tar.zst \
-            -C sdk \
-            --strip-components=1
-
-      - name: Cache downloads
+      - name: Cache SDK
         uses: actions/cache@v4
         with:
           path: |
             sdk/dl
             sdk/staging_dir
             sdk/build_dir
-          key: sdk-${{ matrix.version }}-${{ hashFiles('Makefile') }}
+          key: sdk-${{ matrix.version }}-${{ hashFiles('package-src/Makefile') }}
           restore-keys: |
             sdk-${{ matrix.version }}-
 
@@ -84,37 +83,46 @@ jobs:
         working-directory: sdk
         run: |
           ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          ./scripts/feeds install luci-base
 
-      - name: Add package
+      - name: Copy package
         run: |
           mkdir -p sdk/package/luci-app-tailscale-community
 
-          cp -a . sdk/package/luci-app-tailscale-community
+          rsync -a \
+            --exclude=".git" \
+            --exclude=".github" \
+            package-src/ \
+            sdk/package/luci-app-tailscale-community/
 
-          rm -rf sdk/package/luci-app-tailscale-community/.git
-          rm -rf sdk/package/luci-app-tailscale-community/.github
+      - name: Verify package
+        run: |
+          ls -lah sdk/package/luci-app-tailscale-community
+          test -f sdk/package/luci-app-tailscale-community/Makefile
 
-      - name: Build
+      - name: Configure
         working-directory: sdk
         run: |
           make defconfig
 
+      - name: Build
+        working-directory: sdk
+        run: |
           make package/luci-app-tailscale-community/clean
 
           make package/luci-app-tailscale-community/compile \
-            V=sc \
+            V=s \
             -j$(nproc)
 
-      - name: Show packages
+      - name: Find packages
         run: |
-          find sdk/bin/packages -type f
+          find sdk/bin -type f
 
-      - name: Collect package
+      - name: Collect artifacts
         run: |
           mkdir artifacts
 
-          find sdk/bin/packages \
+          find sdk/bin \
             -type f \
             \( \
               -name "*.ipk" \
@@ -123,9 +131,9 @@ jobs:
             \) \
             -exec cp {} artifacts/ \;
 
-          ls -lh artifacts
+          ls -lah artifacts
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-tailscale-community-${{ matrix.version }}

@@ -2,20 +2,13 @@ name: Build luci-app-tailscale-community (IPK/APK)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'root/**'
-      - 'htdocs/**'
-      - 'po/**'
-      - 'Makefile'
-      - '.github/workflows/build.yml'
 
 jobs:
   build:
     name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -92,4 +85,18 @@ jobs:
           name: luci-app-tailscale-community-${{ matrix.pkg_format }}-${{ matrix.version }}
           path: artifacts/*
           if-no-files-found: error
+
+      - name: Set release tag
+        id: tag
+        run: echo "tag=build-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Build ${{ matrix.name }} - ${{ steps.tag.outputs.tag }}"
+          files: artifacts/*
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           

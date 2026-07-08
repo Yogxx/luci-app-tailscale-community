@@ -26,6 +26,7 @@ jobs:
           rsync -av --delete \
             --exclude '.git' \
             --exclude '.github' \
+            --exclude 'root/usr/share/luci/menu.d/luci-app-tailscale-community.json' \
             /tmp/upstream/applications/luci-app-tailscale-community/ ./
 
       - name: Commit and push if changed

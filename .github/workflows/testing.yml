@@ -1,0 +1,102 @@
+name: Build luci-app-tailscale-community (APK)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "25.12.4 (APK)"
+            version: "25.12.4"
+            pkg_format: apk
+            sdk_url: "https://downloads.openwrt.org/releases/25.12.4/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.4-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+
+    steps:
+      - name: Checkout package source
+        uses: actions/checkout@v4
+        with:
+          path: package-src
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev \
+            gawk git gettext libssl-dev python3 rsync unzip file wget zstd
+
+      - name: Download and extract SDK
+        run: |
+          wget -q "${{ matrix.sdk_url }}" -O sdk.tar.zst
+          mkdir -p sdk
+          tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
+
+      - name: Cache SDK feeds/build state
+        uses: actions/cache@v4
+        with:
+          path: |
+            sdk/staging_dir
+            sdk/build_dir
+          key: sdk-${{ matrix.version }}-aarch64_cortex-a72-${{ hashFiles('package-src/Makefile') }}
+          restore-keys: |
+            sdk-${{ matrix.version }}-aarch64_cortex-a72-
+
+      - name: Update and install feeds
+        working-directory: sdk
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Add package into luci feed (so ../../luci.mk resolves)
+        working-directory: sdk
+        run: |
+          mkdir -p feeds/luci/applications/luci-app-tailscale-community
+          cp -r ../package-src/. feeds/luci/applications/luci-app-tailscale-community/
+          rm -rf feeds/luci/applications/luci-app-tailscale-community/.github
+          rm -rf package/luci-app-tailscale-community
+          ln -sf ../feeds/luci/applications/luci-app-tailscale-community package/luci-app-tailscale-community
+          ls -la package/luci-app-tailscale-community
+          ls -la feeds/luci/applications/luci-app-tailscale-community
+
+      - name: Build package only
+        working-directory: sdk
+        run: |
+          make defconfig
+          for i in 1 2 3; do
+            make package/luci-app-tailscale-community/compile V=s -j1 && break
+            echo "Build attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
+
+      - name: Collect built package
+        run: |
+          mkdir -p artifacts
+          find sdk/bin -type f \( -name "luci-app-tailscale-community*.ipk" -o -name "luci-app-tailscale-community*.apk" \) -exec cp {} artifacts/ \;
+          ls -la artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-tailscale-community-${{ matrix.pkg_format }}-${{ matrix.version }}
+          path: artifacts/*
+          if-no-files-found: error
+
+      - name: Set release tag
+        id: tag
+        run: echo "tag=build-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Build ${{ matrix.name }} - ${{ steps.tag.outputs.tag }}"
+          files: artifacts/*
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          

@@ -13,10 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: "24.10.7 (IPK)"
-            version: "24.10.7"
+          - name: "24.10.8 (IPK)"
+            version: "24.10.8"
             pkg_format: ipk
-            sdk_url: "https://downloads.openwrt.org/releases/24.10.7/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.7-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+            sdk_url: "https://downloads.openwrt.org/releases/24.10.8/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.8-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
 
     steps:
       - name: Checkout package source

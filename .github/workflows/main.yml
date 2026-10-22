@@ -1,4 +1,4 @@
-name: Build luci-app-tailscale-community (APK)
+name: Build luci-app-tailscale-community (IPK + APK)
 
 on:
   workflow_dispatch:
@@ -8,15 +8,19 @@ jobs:
     name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: "25.12.6 (APK)"
-            version: "25.12.6"
+          - name: "snapshot (APK)"
+            version: "snapshot"
             pkg_format: apk
-            sdk_url: "https://downloads.openwrt.org/releases/25.12.6/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.6-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+            sdk_url: "https://downloads.openwrt.org/snapshots/targets/x86/64/openwrt-sdk-x86-64_gcc-14.4.0_musl.Linux-x86_64.tar.zst"
+          - name: "24.10.8 (IPK)"
+            version: "24.10.8"
+            pkg_format: ipk
+            sdk_url: "https://downloads.openwrt.org/releases/24.10.8/targets/x86/64/openwrt-sdk-24.10.8-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
 
     steps:
       - name: Checkout package source
@@ -37,14 +41,15 @@ jobs:
           tar --use-compress-program=unzstd -xf sdk.tar.zst -C sdk --strip-components=1
 
       - name: Cache SDK feeds/build state
+        if: matrix.version != 'snapshot'
         uses: actions/cache@v4
         with:
           path: |
             sdk/staging_dir
             sdk/build_dir
-          key: sdk-${{ matrix.version }}-aarch64_cortex-a72-${{ hashFiles('package-src/Makefile') }}
+          key: sdk-${{ matrix.version }}-${{ matrix.pkg_format }}-x86_64-${{ hashFiles('package-src/Makefile') }}
           restore-keys: |
-            sdk-${{ matrix.version }}-aarch64_cortex-a72-
+            sdk-${{ matrix.version }}-${{ matrix.pkg_format }}-x86_64-
 
       - name: Update and install feeds
         working-directory: sdk
@@ -60,8 +65,6 @@ jobs:
           rm -rf feeds/luci/applications/luci-app-tailscale-community/.github
           rm -rf package/luci-app-tailscale-community
           ln -sf ../feeds/luci/applications/luci-app-tailscale-community package/luci-app-tailscale-community
-          ls -la package/luci-app-tailscale-community
-          ls -la feeds/luci/applications/luci-app-tailscale-community
 
       - name: Build package only
         working-directory: sdk
@@ -76,7 +79,12 @@ jobs:
       - name: Collect built package
         run: |
           mkdir -p artifacts
-          find sdk/bin -type f \( -name "luci-app-tailscale-community*.ipk" -o -name "luci-app-tailscale-community*.apk" \) -exec cp {} artifacts/ \;
+          ext="${{ matrix.pkg_format }}"
+          find sdk/bin -type f -name "luci-app-tailscale-community*.${ext}" -exec cp {} artifacts/ \;
+          for f in artifacts/*."${ext}"; do
+            base="$(basename "$f" ".${ext}")"
+            mv "$f" "artifacts/${base}_openwrt-${{ matrix.version }}.${ext}"
+          done
           ls -la artifacts/
 
       - name: Upload artifact
@@ -86,6 +94,20 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
 
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: luci-app-tailscale-community-*
+          path: artifacts
+          merge-multiple: true
+
       - name: Set release tag
         id: tag
         run: echo "tag=build-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
@@ -94,9 +116,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: "Build ${{ matrix.name }} - ${{ steps.tag.outputs.tag }}"
+          name: "Build ${{ steps.tag.outputs.tag }} (IPK + APK)"
           files: artifacts/*
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          

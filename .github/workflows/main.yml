@@ -108,15 +108,15 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Set release tag
-        id: tag
-        run: echo "tag=build-$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
-
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: "Build ${{ steps.tag.outputs.tag }} (IPK + APK)"
+          tag_name: v1.0.${{ github.run_number }}
+          name: luci-app-tailscale-community v1.0.${{ github.run_number }}
+          body: |
+            Package: luci-app-tailscale-community
+            - IPK: OpenWrt 24.10.8
+            - APK: OpenWrt snapshot
           files: artifacts/*
           make_latest: true
         env:

@@ -1,45 +1,157 @@
-name: Delete All Releases & Tags
-
+name: Delete old workflow runs & artifacts
 on:
   workflow_dispatch:
     inputs:
-      confirm:
-        description: 'Ketik "yes" untuk konfirmasi hapus semua release dan tag'
-        required: true
+      delete_releases:
+        description: 'Hapus releases lama (sisakan 1 terbaru)'
+        type: boolean
+        default: false
+      delete_tags:
+        description: 'Hapus tags lama (sisakan 1 terbaru)'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 0 * * 0'
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
-  delete-releases:
+  cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Check confirmation
-        if: ${{ github.event.inputs.confirm != 'yes' }}
-        run: |
-          echo "Konfirmasi tidak sesuai, batal."
-          exit 1
-
-      - uses: actions/checkout@v4
+      - name: Delete workflow runs
+        uses: actions/github-script@v7
         with:
-          fetch-depth: 0
+          script: |
+            const { owner, repo } = context.repo;
+            const keepMinimumRuns = 0;
+            const retainDays = 0;
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - retainDays);
 
-      - name: Delete all releases and their tags
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          repo="${{ github.repository }}"
-          for id in $(gh release list --repo "$repo" --limit 1000 --json tagName -q '.[].tagName'); do
-            echo "Menghapus release: $id"
-            gh release delete "$id" --repo "$repo" --yes --cleanup-tag
-          done
+            let allRuns = [];
+            let page = 1;
+            while (true) {
+              const res = await github.rest.actions.listWorkflowRunsForRepo({
+                owner, repo, per_page: 100, page
+              });
+              if (res.data.workflow_runs.length === 0) break;
+              allRuns.push(...res.data.workflow_runs);
+              page++;
+            }
 
-      - name: Delete any remaining tags
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          repo="${{ github.repository }}"
-          for tag in $(gh api "repos/$repo/tags" --paginate -q '.[].name'); do
-            echo "Menghapus tag: $tag"
-            gh api -X DELETE "repos/$repo/git/refs/tags/$tag" || true
-          done
+            allRuns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            const toDelete = allRuns
+              .slice(keepMinimumRuns)
+              .filter(run =>
+                run.status === 'completed' &&
+                run.id !== context.runId &&
+                new Date(run.created_at) <= cutoff
+              );
+
+            console.log(`Total runs: ${allRuns.length}, akan dihapus: ${toDelete.length}`);
+
+            for (const run of toDelete) {
+              try {
+                await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
+                console.log(`Deleted: ${run.name} #${run.run_number} (${run.id})`);
+              } catch (e) {
+                console.log(`Failed ${run.id}: ${e.message}`);
+              }
+            }
+
+      - name: Delete all artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            while (true) {
+              const res = await github.rest.actions.listArtifactsForRepo({
+                owner, repo, per_page: 100, page: 1
+              });
+              if (res.data.artifacts.length === 0) break;
+              let deleted = 0;
+              for (const artifact of res.data.artifacts) {
+                try {
+                  await github.rest.actions.deleteArtifact({ owner, repo, artifact_id: artifact.id });
+                  deleted++;
+                } catch (e) {
+                  console.log(`Failed ${artifact.id}: ${e.message}`);
+                }
+              }
+              if (deleted === 0) break;
+            }
+
+      - name: Delete old releases (sisakan 1 terbaru)
+        if: ${{ inputs.delete_releases }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const keepReleases = 1;
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 100
+            });
+            releases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            const toDelete = releases.slice(keepReleases);
+            console.log(`Total releases: ${releases.length}, dihapus: ${toDelete.length}`);
+            releases.slice(0, keepReleases).forEach(r =>
+              console.log(`Keep release: ${r.name || r.tag_name} (${r.tag_name})`)
+            );
+
+            for (const rel of toDelete) {
+              try {
+                await github.rest.repos.deleteRelease({ owner, repo, release_id: rel.id });
+                console.log(`Deleted release: ${rel.name || rel.tag_name} (${rel.id})`);
+              } catch (e) {
+                console.log(`Failed release ${rel.id}: ${e.message}`);
+              }
+            }
+
+      - name: Delete old tags (sisakan 1 terbaru)
+        if: ${{ inputs.delete_tags }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+
+            const tags = await github.paginate(github.rest.repos.listTags, {
+              owner, repo, per_page: 100
+            });
+            if (tags.length === 0) return console.log('Gak ada tag.');
+
+            // Tag yang dipertahankan = tag milik release terbaru (biar release-nya gak orphan)
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 100
+            });
+            releases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            let keepTag = releases.length ? releases[0].tag_name : null;
+
+            // Fallback: gak ada release -> ambil tag dengan commit paling baru
+            if (!keepTag) {
+              let newest = null;
+              for (const t of tags) {
+                const c = await github.rest.git.getCommit({ owner, repo, commit_sha: t.commit.sha });
+                const d = new Date(c.data.committer.date);
+                if (!newest || d > newest.date) newest = { name: t.name, date: d };
+              }
+              keepTag = newest.name;
+            }
+
+            console.log(`Keep tag: ${keepTag}`);
+            const toDelete = tags.filter(t => t.name !== keepTag);
+            console.log(`Total tags: ${tags.length}, dihapus: ${toDelete.length}`);
+
+            for (const tag of toDelete) {
+              try {
+                await github.rest.git.deleteRef({ owner, repo, ref: `tags/${tag.name}` });
+                console.log(`Deleted tag: ${tag.name}`);
+              } catch (e) {
+                console.log(`Failed tag ${tag.name}: ${e.message}`);
+              }
+            }

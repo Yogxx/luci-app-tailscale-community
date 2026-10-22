@@ -13,10 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: "25.12.4 (APK)"
-            version: "25.12.4"
+          - name: "25.12.6 (APK)"
+            version: "25.12.6"
             pkg_format: apk
-            sdk_url: "https://downloads.openwrt.org/releases/25.12.4/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.4-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+            sdk_url: "https://downloads.openwrt.org/releases/25.12.6/targets/bcm27xx/bcm2711/openwrt-sdk-25.12.6-bcm27xx-bcm2711_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
 
     steps:
       - name: Checkout package source
